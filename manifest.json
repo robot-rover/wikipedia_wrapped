@@ -1,0 +1,36 @@
+{
+    "manifest_version": 2,
+    "name": "Wikipedia Wrapped",
+    "version": "0.1",
+
+    "description": "Records all of the wikipedia articles visited",
+
+    "icons": {
+      "48": "Wikipedia-logo-v2_48.png",
+      "200": "Wikipedia-logo-v2.png"
+    },
+
+    "browser_action": {
+      "default_icon": {
+        "48": "Wikipedia-logo-v2_48.png",
+        "200": "Wikipedia-logo-v2.png"
+      },
+      "default_title": "Wikipedia Wrapped"
+    },
+
+
+    "background": {
+        "scripts": [ "background.js" ]
+    },
+    "permissions": [ "webNavigation", "storage", "unlimitedStorage", "downloads" ],
+    "browser_specific_settings": {
+      "gecko": {
+        "strict_min_version": "102.0",
+        "update_url": "https://recipe.soon.it/updates.json"
+      },
+      "gecko_android": {
+        "strict_min_version": "113.0",
+        "update_url": "https://recipe.soon.it/updates-m.json"
+      }
+    }
+  }
