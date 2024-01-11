@@ -17,13 +17,6 @@ function promisifyResult(request) {
   });
 }
 
-function promisifyRequest(request) {
-  return new Promise((resolve, reject) => {
-      request.oncomplete = request.onsuccess = () => resolve(request);
-      request.onabort = request.onerror = () => reject(request.error);
-  });
-}
-
 function error_fmt(message) {
     return (event) => {
         console.error(message, event, event.stack);
@@ -49,19 +42,16 @@ DBOpenRequest.onupgradeneeded = (event) => {
     objectStore.createIndex("dur", "dur", { unique: false });
 }
 
-function add_record(pageName, accessTime, idCallback) {
+function add_record(pageName, accessTime) {
   const transaction = db.transaction([storeName], 'readwrite');
 
   transaction.onerror = error_fmt("Database transaction failed");
 
   const objectStore = transaction.objectStore(storeName);
-  const osAddReq = objectStore.add( { time: accessTime.toISOString(), title: pageName, dur: 0 } );
-  osAddReq.onerror = error_fmt("Object store add request failed");
-  osAddReq.onsuccess = (event) => {
-    const id = osAddReq.result;
+  return promisifyResult(objectStore.add( { time: accessTime.toISOString(), title: pageName, dur: 0 } )).then((id) => {
     console.log('Opened ', pageName, ' (id ', id,  ') at ', accessTime.toISOString());
-    idCallback(id);
-  };
+    return id;
+  }, error_fmt("Object store add request failed"));
 }
 
 function set_close(key, closeTime) {
@@ -69,33 +59,46 @@ function set_close(key, closeTime) {
   transaction.onerror = error_fmt("Database transaction failed");
 
   const objectStore = transaction.objectStore(storeName);
-  const osGetReq = objectStore.get( key );
-  osGetReq.onerror = error_fmt("Object store get request failed");
-  osGetReq.onsuccess = (event) => {
-    const record = osGetReq.result;
+  return promisifyResult(objectStore.get( key )).then((record) => {
     record.dur = (closeTime - new Date(record.time)) / 1000;
-    const osSetReq = objectStore.put(record, key);
-    osSetReq.onsuccess = (event) => {
+    return promisifyResult(objectStore.put(record, key)).then((_key) => {
       console.log('Closed ', record.title, ' (id ', key, ') w/ duration ', record.dur);
-    }
-    osSetReq.onerror = error_fmt('Object Store set request failed')
-  };
+    }, error_fmt('Object store set request failed'));
+  }, error_fmt("Object store get request failed"));
 }
-
-openTabs = Object();
 
 function navigate_away(tabId) {
-  if (tabId in openTabs) {
-    set_close(openTabs[tabId][0], new Date());
-    delete openTabs[tabId];
-  }
+  const tabIdStr = tabId.toString();
+  return browser.storage.local.get([tabIdStr]).then((results) => {
+    if (tabIdStr in results) {
+      return set_close(results[tabIdStr][0], new Date()).then(() => {
+        return browser.storage.local.remove([tabIdStr]);
+      })
+    }
+  })
 }
+
+browser.storage.local.get().then((results) => {
+  const toRemove = [];
+  return browser.tabs.query({}).then((tabs) => {
+    const validIds = new Set(tabs.map((tab) => tab.id));
+    for (const tabIdStr in results) {
+      if(!validIds.has(parseInt(tabIdStr))) {
+        toRemove.push(tabIdStr);
+      }
+    }
+    console.log('Removing ', toRemove.length, ' old tab references');
+    return browser.storage.local.remove(toRemove);
+  });
+});
 
 if (ENABLE_SESSIONS) {
   browser.tabs.onCreated.addListener((tab) => {
     browser.sessions.getTabValue(tab.id, tabKey).then((key) => {
       if (key !== undefined) {
-        openTabs[tab.id] = key;
+        const toSet = Object();
+        toSet[tab.id.toString()] = key;
+        browser.storage.local.set(toSet);
       }
     });
   });
@@ -117,27 +120,33 @@ browser.webNavigation.onCompleted.addListener(evt => {
     }
   }
 
-  if (evt.tabId in openTabs && openTabs[evt.tabId][1] === pageName) {
-    return;
-  }
-
-  navigate_away(evt.tabId);
-  if (ENABLE_SESSIONS) {
-    browser.sessions.removeTabValue(evt.tabId, tabKey);
-  }
-
-  if (pageName === undefined) {
-    return;
-  }
-
-  const accessTime = new Date();
-
-  add_record(pageName, accessTime, (key) => {
-    openTabs[evt.tabId] = [key, pageName];
-    if (ENABLE_SESSIONS) {
-      browser.sessions.setTabValue(evt.tabId, tabKey, [key, pageName]);
+  browser.storage.local.get([evt.tabId.toString()]).then((results) => {
+    if (evt.tabId in results && results[evt.tabId][1] === pageName) {
+      return;
     }
-  })
+
+    return navigate_away(evt.tabId).then(() => {
+      if (pageName === undefined) {
+        if (ENABLE_SESSIONS) {
+          return browser.sessions.removeTabValue(evt.tabId, tabKey);
+        } else {
+          return;
+        }
+      }
+
+      const accessTime = new Date();
+
+      return add_record(pageName, accessTime).then((key) => {
+        const toSet = Object();
+        toSet[evt.tabId.toString()] = [key, pageName];
+        return browser.storage.local.set(toSet).then(() => {
+          if (ENABLE_SESSIONS) {
+            browser.sessions.setTabValue(evt.tabId, tabKey, [key, pageName]);
+          }
+        });
+      })
+    });
+  });
 }, {
   url: [{schemes: ["http", "https"]}]
 });
