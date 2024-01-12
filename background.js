@@ -5,10 +5,12 @@ const tabKey = 'db_key';
 
 console.log("Loaded Extension");
 
-// navigator.geolocation.getCurrentPosition((pos) => console.log('Position', pos), (err) => console.log('Position Error', err));
-
 const DBOpenRequest = indexedDB.open(dbName, storeVer)
 const ENABLE_SESSIONS = (browser.sessions !== undefined);
+let IS_MOBILE;
+browser.runtime.getPlatformInfo().then(platform => {
+  IS_MOBILE =(platform.os === 'android');
+});
 
 let db;
 
@@ -31,6 +33,10 @@ function get_location() {
   });
 }
 
+function get_download_page(url) {
+  return `<a href="${url}" download="wikipedia_wrapped.json"><button>Download</button></a>`
+}
+
 DBOpenRequest.onerror = error_fmt("Unable to open database");
 
 DBOpenRequest.onsuccess = (event) => {
@@ -44,26 +50,24 @@ DBOpenRequest.onupgradeneeded = (event) => {
 
     db.onerror = error_fmt("Unable to upgrade database");
 
-    const objectStore = db.createObjectStore(storeName, {autoIncrement: true});
+    const objectStore = db.createObjectStore(storeName, { keyPath: 'id', autoIncrement: true});
     objectStore.createIndex("title", "title", { unique: false });
     objectStore.createIndex("time", "time", { unique: false });
     objectStore.createIndex("dur", "dur", { unique: false });
-    objectStore.createIndex("lat", "lat", { unique: false });
-    objectStore.createIndex("lon", "lon", { unique: false });
+    // objectStore.createIndex("lat", "lat", { unique: false });
+    // objectStore.createIndex("lon", "lon", { unique: false });
     objectStore.createIndex("parent", "parent", { unique: false });
 }
 
 function add_record(pageName, accessTime, parent) {
-  return get_location().then((loc) => {
-    const transaction = db.transaction([storeName], 'readwrite');
+  const transaction = db.transaction([storeName], 'readwrite');
 
-    transaction.onerror = error_fmt("Database transaction failed");
-    const objectStore = transaction.objectStore(storeName);
-    return promisifyResult(objectStore.add( { time: accessTime.toISOString(), title: pageName, dur: 0, lat: loc.latitude, lon: loc.longitude, parent: parent } )).then((id) => {
-      console.log('Opened ', pageName, ' (id ', id,  ') at ', accessTime.toISOString());
-      return id;
-    }, error_fmt("Object store add request failed"));
-  });
+  transaction.onerror = error_fmt("Database transaction failed");
+  const objectStore = transaction.objectStore(storeName);
+  return promisifyResult(objectStore.add( { time: accessTime.toISOString(), title: pageName, dur: 0, parent: parent } )).then((id) => {
+    console.log('Opened ', pageName, ' (id ', id,  ') at ', accessTime.toISOString());
+    return id;
+  }, error_fmt("Object store add request failed"));
 }
 
 function set_close(key, closeTime) {
@@ -74,11 +78,12 @@ function set_close(key, closeTime) {
   return promisifyResult(objectStore.get( key )).then((record) => {
     if (record === undefined) {
       console.log('Warn: attempted to close page that does not exist (id: ', key.toString(), ')');
-      return;
+      return false;
     }
     record.dur = (closeTime - new Date(record.time)) / 1000;
-    return promisifyResult(objectStore.put(record, key)).then((_key) => {
+    return promisifyResult(objectStore.put(record)).then((_key) => {
       console.log('Closed ', record.title, ' (id ', key, ') w/ duration ', record.dur);
+      return true;
     }, error_fmt('Object store set request failed'));
   }, error_fmt("Object store get request failed"));
 }
@@ -87,9 +92,13 @@ function navigate_away(tabId, closeTime) {
   const tabIdStr = tabId.toString();
   return browser.storage.local.get([tabIdStr]).then((results) => {
     if (tabIdStr in results) {
-      return set_close(results[tabIdStr][0], closeTime).then(() => {
+      return set_close(results[tabIdStr][0], closeTime).then((isValid) => {
         return browser.storage.local.remove([tabIdStr]).then(() => {
-          return results[tabIdStr][0];
+          if (isValid) {
+            return results[tabIdStr][0];
+          } else {
+            return null;
+          }
         });
       })
     } else {
@@ -178,21 +187,15 @@ browser.webNavigation.onCompleted.addListener(evt => {
   url: [{schemes: ["http", "https"]}]
 });
 
-const downloadIdSet = new Object();
-
-browser.downloads.onChanged.addListener((delta) => {
-  if (delta.state && delta.state.current === 'complete' && delta.id in downloadIdSet) {
-    console.log('Download Finished');
-    URL.revokeObjectURL(downloadIdSet[delta.id]);
-    delete downloadIdSet[delta.id];
-  }
-})
-
 browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
   navigate_away(tabId, new Date());
 });
 
+let data_url = undefined;
+let page_url = undefined;
+
 browser.action.onClicked.addListener((tab, onClickData) => {
+  console.log('Hello World');
   const transaction = db.transaction([storeName], 'readonly');
 
   transaction.onerror = error_fmt("Download transaction failed");
@@ -200,18 +203,27 @@ browser.action.onClicked.addListener((tab, onClickData) => {
 
   const objectStore = transaction.objectStore(storeName);
   promisifyResult(objectStore.getAll()).then((data) => {
-    const blob = new Blob([JSON.stringify(data)], { type: 'application/json', endings: 'native' } );
-    const url = URL.createObjectURL(blob);
+    if (data_url != undefined) {
+      URL.revokeObjectURL(data_url);
+    }
+    data_url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json', endings: 'native' } ));
+    console.log('Data available at ', data_url);
 
-    browser.downloads.download({ url: url, filename: 'wikipedia_wrapped.json' }).then(
-      (downloadId) => {
-        console.log('Download Started');
-        downloadIdSet[downloadId] = url;
-      },
-      () => {
-        console.log('Download Canceled');
-        URL.revokeObjectURL(url);
+    if (IS_MOBILE) {
+      if (page_url != undefined) {
+        URL.revokeObjectURL(page_url);
       }
-    );
+      page_url = URL.createObjectURL(new Blob([get_download_page(data_url)]));
+      browser.tabs.create({active: true, url: page_url});
+    } else {
+      browser.downloads.download({ url: data_url, filename: 'wikipedia_wrapped.json' }).then(
+        (_downloadId) => {
+          console.log('Download Started');
+        },
+        () => {
+          console.log('Download Canceled');
+        }
+      );
+    }
   });
 });
