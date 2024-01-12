@@ -22,7 +22,7 @@
     "background": {
         "scripts": [ "background.js" ]
     },
-    "permissions": [ "tabs", "webNavigation", "storage", "unlimitedStorage", "downloads", "sessions" ],
+    "permissions": [ "tabs", "webNavigation", "storage", "unlimitedStorage", "downloads", "sessions", "geolocation" ],
     "browser_specific_settings": {
       "gecko": {
         "id": "wikipedia_wrapped@soon.it",

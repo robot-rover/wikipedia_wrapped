@@ -5,6 +5,8 @@ const tabKey = 'db_key';
 
 console.log("Loaded Extension");
 
+// navigator.geolocation.getCurrentPosition((pos) => console.log('Position', pos), (err) => console.log('Position Error', err));
+
 const DBOpenRequest = indexedDB.open(dbName, storeVer)
 const ENABLE_SESSIONS = (browser.sessions !== undefined);
 
@@ -21,6 +23,12 @@ function error_fmt(message) {
     return (event) => {
         console.error(message, event, event.stack);
     }
+}
+
+function get_location() {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(pos => resolve(pos.coords), error_fmt("Unable to get geolocation"));
+  });
 }
 
 DBOpenRequest.onerror = error_fmt("Unable to open database");
@@ -40,18 +48,22 @@ DBOpenRequest.onupgradeneeded = (event) => {
     objectStore.createIndex("title", "title", { unique: false });
     objectStore.createIndex("time", "time", { unique: false });
     objectStore.createIndex("dur", "dur", { unique: false });
+    objectStore.createIndex("lat", "lat", { unique: false });
+    objectStore.createIndex("lon", "lon", { unique: false });
+    objectStore.createIndex("parent", "parent", { unique: false });
 }
 
-function add_record(pageName, accessTime) {
-  const transaction = db.transaction([storeName], 'readwrite');
+function add_record(pageName, accessTime, parent) {
+  return get_location().then((loc) => {
+    const transaction = db.transaction([storeName], 'readwrite');
 
-  transaction.onerror = error_fmt("Database transaction failed");
-
-  const objectStore = transaction.objectStore(storeName);
-  return promisifyResult(objectStore.add( { time: accessTime.toISOString(), title: pageName, dur: 0 } )).then((id) => {
-    console.log('Opened ', pageName, ' (id ', id,  ') at ', accessTime.toISOString());
-    return id;
-  }, error_fmt("Object store add request failed"));
+    transaction.onerror = error_fmt("Database transaction failed");
+    const objectStore = transaction.objectStore(storeName);
+    return promisifyResult(objectStore.add( { time: accessTime.toISOString(), title: pageName, dur: 0, lat: loc.latitude, lon: loc.longitude, parent: parent } )).then((id) => {
+      console.log('Opened ', pageName, ' (id ', id,  ') at ', accessTime.toISOString());
+      return id;
+    }, error_fmt("Object store add request failed"));
+  });
 }
 
 function set_close(key, closeTime) {
@@ -67,13 +79,17 @@ function set_close(key, closeTime) {
   }, error_fmt("Object store get request failed"));
 }
 
-function navigate_away(tabId) {
+function navigate_away(tabId, closeTime) {
   const tabIdStr = tabId.toString();
   return browser.storage.local.get([tabIdStr]).then((results) => {
     if (tabIdStr in results) {
-      return set_close(results[tabIdStr][0], new Date()).then(() => {
-        return browser.storage.local.remove([tabIdStr]);
+      return set_close(results[tabIdStr][0], closeTime).then(() => {
+        return browser.storage.local.remove([tabIdStr]).then(() => {
+          return results[tabIdStr][0];
+        });
       })
+    } else {
+      return null;
     }
   })
 }
@@ -120,12 +136,14 @@ browser.webNavigation.onCompleted.addListener(evt => {
     }
   }
 
+  const accessTime = new Date();
+
   browser.storage.local.get([evt.tabId.toString()]).then((results) => {
     if (evt.tabId in results && results[evt.tabId][1] === pageName) {
       return;
     }
 
-    return navigate_away(evt.tabId).then(() => {
+    return navigate_away(evt.tabId, accessTime).then((prev_key) => {
       if (pageName === undefined) {
         if (ENABLE_SESSIONS) {
           return browser.sessions.removeTabValue(evt.tabId, tabKey);
@@ -134,9 +152,7 @@ browser.webNavigation.onCompleted.addListener(evt => {
         }
       }
 
-      const accessTime = new Date();
-
-      return add_record(pageName, accessTime).then((key) => {
+      return add_record(pageName, accessTime, prev_key).then((key) => {
         const toSet = Object();
         toSet[evt.tabId.toString()] = [key, pageName];
         return browser.storage.local.set(toSet).then(() => {
@@ -162,7 +178,7 @@ browser.downloads.onChanged.addListener((delta) => {
 })
 
 browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
-  navigate_away(tabId);
+  navigate_away(tabId, new Date());
 });
 
 browser.action.onClicked.addListener((tab, onClickData) => {
