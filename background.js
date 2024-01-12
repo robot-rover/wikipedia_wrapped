@@ -129,10 +129,17 @@ browser.webNavigation.onCompleted.addListener(evt => {
   const url = new URL(evt.url);
 
   let pageName = undefined;
+  let isSearch = false;
   if (url.host.endsWith("wikipedia.org")) {
     const match = url.pathname.match(/^\/wiki\/(.+)$/);
     if (match !== null) {
       pageName = match[1];
+    } else if (url.pathname === '/w/index.php') {
+      searchTerm = url.searchParams.get("search");
+      if (searchTerm !== null) {
+        pageName = 'search:' + searchTerm;
+        isSearch = true;
+      }
     }
   }
 
@@ -152,7 +159,7 @@ browser.webNavigation.onCompleted.addListener(evt => {
         }
       }
 
-      return add_record(pageName, accessTime, prev_key).then((key) => {
+      return add_record(pageName, accessTime, isSearch ? null : prev_key).then((key) => {
         const toSet = Object();
         toSet[evt.tabId.toString()] = [key, pageName];
         return browser.storage.local.set(toSet).then(() => {
