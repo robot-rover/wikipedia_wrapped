@@ -72,6 +72,10 @@ function set_close(key, closeTime) {
 
   const objectStore = transaction.objectStore(storeName);
   return promisifyResult(objectStore.get( key )).then((record) => {
+    if (record === undefined) {
+      console.log('Warn: attempted to close page that does not exist (id: ', key.toString(), ')');
+      return;
+    }
     record.dur = (closeTime - new Date(record.time)) / 1000;
     return promisifyResult(objectStore.put(record, key)).then((_key) => {
       console.log('Closed ', record.title, ' (id ', key, ') w/ duration ', record.dur);
@@ -191,13 +195,11 @@ browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
 browser.action.onClicked.addListener((tab, onClickData) => {
   const transaction = db.transaction([storeName], 'readonly');
 
-  transaction.onerror = error_fmt("Database transaction failed");
-  transaction.oncomplete = () => { console.log("Transaction Complete!")};
+  transaction.onerror = error_fmt("Download transaction failed");
+  transaction.oncomplete = () => { console.log("Download transaction complete!")};
 
   const objectStore = transaction.objectStore(storeName);
-  const objectStoreRequest = objectStore.getAll();
-  objectStoreRequest.onsuccess = (event) => {
-    const data = objectStoreRequest.result;
+  promisifyResult(objectStore.getAll()).then((data) => {
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json', endings: 'native' } );
     const url = URL.createObjectURL(blob);
 
@@ -211,5 +213,5 @@ browser.action.onClicked.addListener((tab, onClickData) => {
         URL.revokeObjectURL(url);
       }
     );
-  };
+  });
 });
