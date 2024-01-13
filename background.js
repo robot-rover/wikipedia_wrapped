@@ -36,7 +36,27 @@ function get_location() {
 }
 
 function get_download_page(url) {
-  return `<a href="${url}" download="wikipedia_wrapped.json"><button>Download</button></a>`
+  return `
+    <style>
+      .center {
+        margin: 0;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        -ms-transform: translate(-50%, -50%);
+        transform: translate(-50%, -50%);
+      }
+
+      .dl-btn {
+        font-size: 40px;
+        padding: 10px;
+      }
+    </style>
+
+    <div class="center">
+      <a href="${url}" download="wikipedia_wrapped.json"><button class="dl-btn">Download</button></a>
+    </div>
+  `;
 }
 
 DBOpenRequest.onerror = error_fmt("Unable to open database");
@@ -52,17 +72,15 @@ DBOpenRequest.onupgradeneeded = (event) => {
 
     db.onerror = error_fmt("Unable to upgrade database");
 
-    const dbOptions = { keyPath: "id", autoIncrement: true };
-
-    const beginStore = db.createObjectStore(beginStoreName, dbOptions);
+    const beginStore = db.createObjectStore(beginStoreName, { keyPath: "id", autoIncrement: true } );
     beginStore.createIndex("title", "title");
     beginStore.createIndex("begin", "begin");
     beginStore.createIndex("parent", "parent");
 
-    const endStore = db.createObjectStore(endStoreName, dbOptions);
+    const endStore = db.createObjectStore(endStoreName, { keyPath: "id" });
     endStore.createIndex("end", "end");
 
-    const locStore = db.createObjectStore(locStoreName, dbOptions);
+    const locStore = db.createObjectStore(locStoreName, { keyPath: "id" });
     locStore.createIndex("lat", "lat");
     locStore.createIndex("lon", "lon");
 }
@@ -165,6 +183,7 @@ if (ENABLE_SESSIONS) {
 
 browser.webNavigation.onCompleted.addListener(async evt => {
   // Filter out any sub-frame related navigation event
+  console.log('Hello World');
   if (evt.frameId !== 0) {
     return;
   }

@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Wikipedia Wrapped",
-    "version": "0.3",
+    "version": "0.4",
 
     "description": "Records all of the wikipedia articles visited",
 
@@ -25,7 +25,7 @@
     "permissions": [ "tabs", "webNavigation", "storage", "unlimitedStorage", "downloads", "sessions", "geolocation" ],
     "browser_specific_settings": {
       "gecko": {
-        "id": "wikipedia_wrapped@soon.it",
+        "id": "{966a7a78-be61-4a5e-8a4c-b01eea30e78a}",
         "strict_min_version": "109.0",
         "update_url": "https://recipe.soon.it/updates.json"
       },
