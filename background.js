@@ -183,7 +183,6 @@ if (ENABLE_SESSIONS) {
 
 browser.webNavigation.onCompleted.addListener(async evt => {
   // Filter out any sub-frame related navigation event
-  console.log('Hello World');
   if (evt.frameId !== 0) {
     return;
   }
