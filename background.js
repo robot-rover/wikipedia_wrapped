@@ -14,7 +14,6 @@ browser.runtime.getPlatformInfo().then(platform => {
   IS_MOBILE =(platform.os === 'android');
 });
 
-let db;
 
 function promisifyResult(request) {
   return new Promise((resolve, reject) => {
@@ -35,58 +34,50 @@ function get_location() {
   });
 }
 
-function get_download_page(url) {
-  return `
-    <style>
-      .center {
-        margin: 0;
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        -ms-transform: translate(-50%, -50%);
-        transform: translate(-50%, -50%);
-      }
+function open_db() {
+    const dbOpenRequest = indexedDB.open(dbName, dbVer)
+    return new Promise((resolve, reject) => {
+        dbOpenRequest.onsuccess = () => {
+            console.log('Database Loaded');
+            resolve(dbOpenRequest.result);
+        };
+        dbOpenRequest.onerror = () => reject(dbOpenRequest.error);
+        dbOpenRequest.onupgradeneeded = (event) => {
+            console.log(`Loaded Database (Upgrading from ${event.oldVersion} to ${event.newVersion})`)
+            db = event.target.result;
 
-      .dl-btn {
-        font-size: 40px;
-        padding: 10px;
-      }
-    </style>
+            db.onerror = () => reject("Unable to upgrade database");
 
-    <div class="center">
-      <a href="${url}" download="wikipedia_wrapped.json"><button class="dl-btn">Download</button></a>
-    </div>
-  `;
+            let curVersion = event.oldVersion;
+
+            if (curVersion === 0) {
+                // Upgrading from 0 to 1
+                const beginStore = db.createObjectStore(beginStoreName, { keyPath: "id", autoIncrement: true } );
+                beginStore.createIndex("title", "title");
+                beginStore.createIndex("begin", "begin");
+                beginStore.createIndex("parent", "parent");
+
+                const endStore = db.createObjectStore(endStoreName, { keyPath: "id" });
+                endStore.createIndex("end", "end");
+
+                const locStore = db.createObjectStore(locStoreName, { keyPath: "id" });
+                locStore.createIndex("lat", "lat");
+                locStore.createIndex("lon", "lon");
+
+                curVersion = 1;
+            }
+
+            if (curVersion != dbVer) {
+                reject("Database upgrade procedure failed");
+            }
+        };
+    });
 }
-
-DBOpenRequest.onerror = error_fmt("Unable to open database");
-
-DBOpenRequest.onsuccess = (event) => {
-    console.log("Loaded Database")
-    db = DBOpenRequest.result;
-}
-
-DBOpenRequest.onupgradeneeded = (event) => {
-    console.log(`Loaded Database (Upgrading from ${event.oldVersion} to ${event.newVersion})`)
-    db = event.target.result;
-
-    db.onerror = error_fmt("Unable to upgrade database");
-
-    const beginStore = db.createObjectStore(beginStoreName, { keyPath: "id", autoIncrement: true } );
-    beginStore.createIndex("title", "title");
-    beginStore.createIndex("begin", "begin");
-    beginStore.createIndex("parent", "parent");
-
-    const endStore = db.createObjectStore(endStoreName, { keyPath: "id" });
-    endStore.createIndex("end", "end");
-
-    const locStore = db.createObjectStore(locStoreName, { keyPath: "id" });
-    locStore.createIndex("lat", "lat");
-    locStore.createIndex("lon", "lon");
-}
+let DB;
+open_db().then((db) => { DB = db; });
 
 function set_loc(key, loc) {
-  const transaction = db.transaction([locStoreName], 'readwrite');
+  const transaction = DB.transaction([locStoreName], 'readwrite');
 
   transaction.onerror = error_fmt("loc database transaction failed");
   const locStore = transaction.objectStore(locStoreName);
@@ -96,7 +87,7 @@ function set_loc(key, loc) {
 }
 
 function set_begin(pageName, accessTime, parent) {
-  const transaction = db.transaction([beginStoreName], 'readwrite');
+  const transaction = DB.transaction([beginStoreName], 'readwrite');
 
   transaction.onerror = error_fmt("begin database transaction failed");
   const beginStore = transaction.objectStore(beginStoreName);
@@ -107,7 +98,7 @@ function set_begin(pageName, accessTime, parent) {
 }
 
 function set_end(key, closeTime) {
-  const transaction = db.transaction([endStoreName], 'readwrite');
+  const transaction = DB.transaction([endStoreName], 'readwrite');
   transaction.onerror = error_fmt("end database transaction failed");
 
   const endStore = transaction.objectStore(endStoreName);
@@ -129,7 +120,7 @@ async function navigate_away(tabId, closeTime) {
 }
 
 async function get_all_data() {
-  const transaction = db.transaction([beginStoreName, endStoreName, locStoreName], 'readonly');
+  const transaction = DB.transaction([beginStoreName, endStoreName, locStoreName], 'readonly');
   transaction.onerror = error_fmt("get all database transaction failed");
 
   const beginStore = transaction.objectStore(beginStoreName);
@@ -244,9 +235,7 @@ browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
 });
 
 let data_url = undefined;
-let page_url = undefined;
-
-browser.action.onClicked.addListener(async (tab, onClickData) => {
+browser.runtime.onConnect.addListener(async (port) => {
   const data = await get_all_data();
 
   if (data_url != undefined) {
@@ -254,21 +243,10 @@ browser.action.onClicked.addListener(async (tab, onClickData) => {
   }
   data_url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json', endings: 'native' } ));
   console.log('Data available at ', data_url);
+  port.postMessage(data_url);
+});
 
-  if (IS_MOBILE) {
-    if (page_url != undefined) {
-      URL.revokeObjectURL(page_url);
-    }
-    page_url = URL.createObjectURL(new Blob([get_download_page(data_url)]));
-    browser.tabs.create({active: true, url: page_url});
-  } else {
-    browser.downloads.download({ url: data_url, filename: 'wikipedia_wrapped.json' }).then(
-      (_downloadId) => {
-        console.log('Download Started');
-      },
-      () => {
-        console.log('Download Canceled');
-      }
-    );
-  }
+
+browser.action.onClicked.addListener((tab, onClickData) => {
+  browser.tabs.create({active: true, url: 'download.html'});
 });
