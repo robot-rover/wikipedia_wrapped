@@ -250,5 +250,3 @@ browser.runtime.onConnect.addListener(async (port) => {
 browser.action.onClicked.addListener((tab, onClickData) => {
   browser.tabs.create({active: true, url: 'download.html'});
 });
-
-browser.tabs.create({active: true, url: 'download.html'});
