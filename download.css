@@ -23,3 +23,30 @@
   border-style: solid;
   border-width: 1px;
 }
+
+.data-table thead tr td {
+  border: grey;
+  border-style: solid;
+  border-width: 1px;
+  padding: 5px;
+  fill: grey;
+  font-weight: bold;
+}
+
+.data-table tbody tr td {
+  border: grey;
+  border-style: solid;
+  border-width: 1px;
+  padding: 5px;
+}
+
+.timeline div {
+  margin: 20px;
+  border-left: solid medium black;
+  /* background-color: lightgrey; */
+  padding: 2px;
+}
+
+.timeline p {
+  margin: 8px;
+}
