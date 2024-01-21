@@ -7,7 +7,6 @@ const tabKey = 'db_key';
 
 console.log("Loaded Extension");
 
-const DBOpenRequest = indexedDB.open(dbName, dbVer)
 const ENABLE_SESSIONS = (browser.sessions !== undefined);
 let IS_MOBILE;
 browser.runtime.getPlatformInfo().then(platform => {
